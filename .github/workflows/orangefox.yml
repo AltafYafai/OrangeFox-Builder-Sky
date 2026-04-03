@@ -86,7 +86,7 @@ jobs:
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         echo "Cloning OrangeFox vendor tree..."
-        git clone https://gitlab.com/OrangeFox/vendor/common.git -b twrp-${{ github.event.inputs.MANIFEST_BRANCH }} vendor/fox
+        git clone https://gitlab.com/OrangeFox/vendor_common.git -b twrp-${{ github.event.inputs.MANIFEST_BRANCH }} vendor/fox
 
     - name: Building OrangeFox
       run: |
