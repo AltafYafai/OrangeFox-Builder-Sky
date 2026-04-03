@@ -48,7 +48,7 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-              
+
     - name: Clean-up
       uses: rokibhasansagar/slimhub_actions@main
 
@@ -56,7 +56,7 @@ jobs:
       uses: pierotofy/set-swap-space@master
       with:
         swap-size-gb: 12
-      
+
     - name: Build Environment
       run: |
         sudo apt update
@@ -64,7 +64,7 @@ jobs:
         git clone https://gitlab.com/OrangeFox/misc/scripts
         cd scripts
         sudo bash setup/android_build_env.sh
-      
+
     - name: Set-up Manifest
       run: |
         mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
@@ -82,6 +82,12 @@ jobs:
         cd ${{ github.event.inputs.DEVICE_PATH }}
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
+    - name: Clone OrangeFox Vendor Tree
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
+        echo "Cloning OrangeFox vendor tree..."
+        git clone https://gitlab.com/OrangeFox/vendor/common.git -b twrp-${{ github.event.inputs.MANIFEST_BRANCH }} vendor/fox
+
     - name: Building OrangeFox
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
@@ -94,7 +100,7 @@ jobs:
         make clean
         mka adbd ${{ github.event.inputs.BUILD_TARGET }}image
 
-    - name: Set Build Date 
+    - name: Set Build Date
       run: |
         echo "BUILD_DATE=$(TZ=Asia/Kolkata date +%Y%m%d)" >> $GITHUB_ENV
 
