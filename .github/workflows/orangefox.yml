@@ -74,11 +74,6 @@ jobs:
         git clone https://gitlab.com/OrangeFox/sync.git
         cd sync
         ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
-        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
-        echo "Listing entire workspace structure (2 levels deep):"
-        ls -R -L -d * | head -n 100
-        echo "Finding all .mk files:"
-        find . -maxdepth 4 -name "*.mk" | head -n 100
 
     - name: Clone Device Tree
       run: |
