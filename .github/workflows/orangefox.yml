@@ -30,7 +30,7 @@ on:
       BUILD_TARGET:
         description: 'Specify your Build Target'
         required: true
-        default: 'recovery'
+        default: 'vendorboot'
         type: choice
         options:
         - recovery
@@ -82,12 +82,6 @@ jobs:
         cd ${{ github.event.inputs.DEVICE_PATH }}
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
-    - name: Clone OrangeFox Vendor Tree
-      run: |
-        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
-        echo "Cloning OrangeFox vendor tree..."
-        git clone https://gitlab.com/OrangeFox/vendor_common.git -b twrp-${{ github.event.inputs.MANIFEST_BRANCH }} vendor/fox
-
     - name: Building OrangeFox
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
@@ -110,6 +104,8 @@ jobs:
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/
         mkdir -p ${GITHUB_WORKSPACE}/artifacts/
         cp recovery.img ${GITHUB_WORKSPACE}/artifacts/ 2>/dev/null || true
+        cp boot.img ${GITHUB_WORKSPACE}/artifacts/ 2>/dev/null || true
+        cp vendor_boot.img ${GITHUB_WORKSPACE}/artifacts/ 2>/dev/null || true
         cp OrangeFox*.img ${GITHUB_WORKSPACE}/artifacts/ 2>/dev/null || true
         cp OrangeFox*.zip ${GITHUB_WORKSPACE}/artifacts/ 2>/dev/null || true
         if [ "$(ls -A ${GITHUB_WORKSPACE}/artifacts/)" ]; then
