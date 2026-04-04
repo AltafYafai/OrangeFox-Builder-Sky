@@ -45,11 +45,32 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
       TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      DEVICE: ${{ github.event.inputs.DEVICE_NAME }}
+      BRANCH: ${{ github.event.inputs.MANIFEST_BRANCH }}
     permissions:
       contents: write
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+
+    - name: Notify Build Started
+      run: |
+        MSG="🚀 *OrangeFox Build Started*
+        
+        📱 *Device:* \`${{ env.DEVICE }}\`
+        🌳 *Manifest:* \`OrangeFox-${{ env.BRANCH }}\`
+        👤 *Maintainer:* [Altaf Yafai](https://github.com/AltafYafai)
+        
+        🕒 *Status:* \`Initializing Environment...\`
+        🔗 [View Live Logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+        
+        if [ -n "$TG_BOT_TOKEN" ]; then
+          curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TG_CHAT_ID}" \
+            -d "parse_mode=markdown" \
+            -d "text=${MSG}" \
+            -d "disable_web_page_preview=true"
+        fi
 
     - name: Clean-up
       uses: rokibhasansagar/slimhub_actions@main
@@ -69,6 +90,13 @@ jobs:
 
     - name: Set-up Manifest
       run: |
+        # Notify Sync
+        MSG="🧬 *Syncing OrangeFox Sources*
+        
+        🕒 *Status:* \`Pulling Manifest & Patches...\`
+        🔗 [View Progress](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+        curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" -d "chat_id=${TG_CHAT_ID}" -d "parse_mode=markdown" -d "text=${MSG}" -d "disable_web_page_preview=true"
+        
         mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
         cd ${GITHUB_WORKSPACE}/OrangeFox
         git config --global user.name "altafyafai"
@@ -87,6 +115,14 @@ jobs:
 
     - name: Building OrangeFox
       run: |
+        # Notify Build
+        MSG="🏗️ *Starting Compilation*
+        
+        🕒 *Status:* \`Building ${{ github.event.inputs.BUILD_TARGET }}image...\`
+        📝 *Latest Commit:* \`${{ env.COMMIT_MSG }}\`
+        🔗 [View Live Console](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+        curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" -d "chat_id=${TG_CHAT_ID}" -d "parse_mode=markdown" -d "text=${MSG}" -d "disable_web_page_preview=true"
+        
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         set +e
         source build/envsetup.sh
@@ -109,7 +145,6 @@ jobs:
         cp recovery.img ${GITHUB_WORKSPACE}/artifacts/ 2>/dev/null || true
         cp boot.img ${GITHUB_WORKSPACE}/artifacts/ 2>/dev/null || true
         cp vendor_boot.img ${GITHUB_WORKSPACE}/artifacts/ 2>/dev/null || true
-        # Rename zip to a more consistent format if multiple are found
         find . -maxdepth 1 -name "OrangeFox*.zip" -exec cp {} ${GITHUB_WORKSPACE}/artifacts/OrangeFox-Unofficial-${{ github.event.inputs.DEVICE_NAME }}.zip \;
         find . -maxdepth 1 -name "OrangeFox*.img" -exec cp {} ${GITHUB_WORKSPACE}/artifacts/OrangeFox-Unofficial-${{ github.event.inputs.DEVICE_NAME }}.img \;
         
@@ -132,7 +167,6 @@ jobs:
           
           **Device:** Redmi 12 5G / Poco M6 Pro 5G / Redmi Note 12R (`${{ github.event.inputs.DEVICE_NAME }}`)
           **Build Date:** `${{ env.BUILD_DATE }}`
-          **Manifest:** `OrangeFox-${{ github.event.inputs.MANIFEST_BRANCH }}`
           **Variant:** `A14 (Android 14)`
           **Maintainer:** [Altaf Yafai](https://github.com/AltafYafai)
           
@@ -141,32 +175,30 @@ jobs:
           ### 🛠 Build Information
           - **Commit ID:** `${{ env.COMMIT_ID }}`
           - **Commit Message:** `${{ env.COMMIT_MSG }}`
-          - **Device Tree:** [Here](${{ github.event.inputs.DEVICE_TREE }}/tree/${{ github.event.inputs.DEVICE_TREE_BRANCH }})
           
           ### 📥 Downloads
           - **GitHub Releases:** [Click Here](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ env.BUILD_DATE }}-${{ github.run_id }})
-          
-          ---
-          *Automated Build by OrangeFox Builder Sky*
 
-    - name: Send Telegram Notification
-      if: steps.prep.outputs.FILES_FOUND == 'true' && env.TG_BOT_TOKEN != '' && env.TG_CHAT_ID != ''
+    - name: Send Final Telegram Notification
+      if: always()
       run: |
-        MSG="🔥 *OrangeFox Recovery for ${{ github.event.inputs.DEVICE_NAME }} [A14]*
-        
-        🔹 *Device:* \`Redmi 12 5G (sky)\`
-        🔹 *Date:* \`${{ env.BUILD_DATE }}\`
-        🔹 *Variant:* \`A14 (Android 14)\`
-        🔹 *Maintainer:* [Altaf Yafai](https://github.com/AltafYafai)
-        
-        📦 *Build Info:*
-        • [Device Tree](${{ github.event.inputs.DEVICE_TREE }})
-        • Commit: \`${{ env.COMMIT_ID }}\`
-        • Message: \`${{ env.COMMIT_MSG }}\`
-        
-        🔗 [Download from GitHub](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ env.BUILD_DATE }}-${{ github.run_id }})
-        
-        #OrangeFox #Recovery #Sky #Android14"
-        
-        # Upload the ZIP file to Telegram
-        curl -F chat_id="${TG_CHAT_ID}" -F document=@"${ZIP_PATH}" -F caption="${MSG}" -F parse_mode="markdown" https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument
+        if [ "${{ steps.prep.outputs.FILES_FOUND }}" == "true" ]; then
+          MSG="✅ *Build Successful!*
+          
+          📱 *Device:* \`Redmi 12 5G (sky)\`
+          👤 *Maintainer:* [Altaf Yafai](https://github.com/AltafYafai)
+          
+          🔗 [Download from GitHub](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ env.BUILD_DATE }}-${{ github.run_id }})
+          
+          #OrangeFox #Success #Sky #A14"
+          curl -F chat_id="${TG_CHAT_ID}" -F document=@"${ZIP_PATH}" -F caption="${MSG}" -F parse_mode="markdown" https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument
+        else
+          MSG="❌ *Build Failed!*
+          
+          📱 *Device:* \`Redmi 12 5G (sky)\`
+          🕒 *Status:* \`Compilation Error\`
+          
+          🔍 Check the logs to fix the issue.
+          🔗 [View Logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" -d "chat_id=${TG_CHAT_ID}" -d "parse_mode=markdown" -d "text=${MSG}"
+        fi
