@@ -30,7 +30,7 @@ on:
       BUILD_TARGET:
         description: 'Specify your Build Target'
         required: true
-        default: 'vendorboot'
+        default: 'recovery'
         type: choice
         options:
         - recovery
@@ -43,6 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
     permissions:
       contents: write
     steps:
@@ -60,7 +62,7 @@ jobs:
     - name: Build Environment
       run: |
         sudo apt update
-        sudo apt install aria2 -y
+        sudo apt install aria2 curl -y
         git clone https://gitlab.com/OrangeFox/misc/scripts
         cd scripts
         sudo bash setup/android_build_env.sh
@@ -81,6 +83,7 @@ jobs:
         git clone ${{ github.event.inputs.DEVICE_TREE }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
         cd ${{ github.event.inputs.DEVICE_PATH }}
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
+        echo "COMMIT_MSG=$(git log -1 --pretty=%B | head -n 1)" >> $GITHUB_ENV
 
     - name: Building OrangeFox
       run: |
@@ -106,10 +109,13 @@ jobs:
         cp recovery.img ${GITHUB_WORKSPACE}/artifacts/ 2>/dev/null || true
         cp boot.img ${GITHUB_WORKSPACE}/artifacts/ 2>/dev/null || true
         cp vendor_boot.img ${GITHUB_WORKSPACE}/artifacts/ 2>/dev/null || true
-        cp OrangeFox*.img ${GITHUB_WORKSPACE}/artifacts/ 2>/dev/null || true
-        cp OrangeFox*.zip ${GITHUB_WORKSPACE}/artifacts/ 2>/dev/null || true
+        # Rename zip to a more consistent format if multiple are found
+        find . -maxdepth 1 -name "OrangeFox*.zip" -exec cp {} ${GITHUB_WORKSPACE}/artifacts/OrangeFox-Unofficial-${{ github.event.inputs.DEVICE_NAME }}.zip \;
+        find . -maxdepth 1 -name "OrangeFox*.img" -exec cp {} ${GITHUB_WORKSPACE}/artifacts/OrangeFox-Unofficial-${{ github.event.inputs.DEVICE_NAME }}.img \;
+        
         if [ "$(ls -A ${GITHUB_WORKSPACE}/artifacts/)" ]; then
           echo "FILES_FOUND=true" >> $GITHUB_OUTPUT
+          echo "ZIP_PATH=$(ls ${GITHUB_WORKSPACE}/artifacts/*.zip | head -n 1)" >> $GITHUB_ENV
         else
           echo "FILES_FOUND=false" >> $GITHUB_OUTPUT
         fi
@@ -119,9 +125,48 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: ${{ github.workspace }}/artifacts/*
-        name: Unofficial OrangeFox for ${{ github.event.inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
-        tag_name: ${{ github.run_id }}
+        name: OrangeFox Recovery for ${{ github.event.inputs.DEVICE_NAME }} [A14]
+        tag_name: ${{ env.BUILD_DATE }}-${{ github.run_id }}
         body: |
-          Build: OrangeFox ${{ github.event.inputs.MANIFEST_BRANCH }}
-          Device Tree: [${{ github.event.inputs.DEVICE_NAME }}](${{ github.event.inputs.DEVICE_TREE }})
-          Commit: ${{ env.COMMIT_ID }}
+          # 🦊 OrangeFox Recovery Project [A14]
+          
+          **Device:** Redmi 12 5G / Poco M6 Pro 5G / Redmi Note 12R (`${{ github.event.inputs.DEVICE_NAME }}`)
+          **Build Date:** `${{ env.BUILD_DATE }}`
+          **Manifest:** `OrangeFox-${{ github.event.inputs.MANIFEST_BRANCH }}`
+          **Variant:** `A14 (Android 14)`
+          **Maintainer:** [Altaf Yafai](https://github.com/AltafYafai)
+          
+          ---
+          
+          ### 🛠 Build Information
+          - **Commit ID:** `${{ env.COMMIT_ID }}`
+          - **Commit Message:** `${{ env.COMMIT_MSG }}`
+          - **Device Tree:** [Here](${{ github.event.inputs.DEVICE_TREE }}/tree/${{ github.event.inputs.DEVICE_TREE_BRANCH }})
+          
+          ### 📥 Downloads
+          - **GitHub Releases:** [Click Here](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ env.BUILD_DATE }}-${{ github.run_id }})
+          
+          ---
+          *Automated Build by OrangeFox Builder Sky*
+
+    - name: Send Telegram Notification
+      if: steps.prep.outputs.FILES_FOUND == 'true' && env.TG_BOT_TOKEN != '' && env.TG_CHAT_ID != ''
+      run: |
+        MSG="🔥 *OrangeFox Recovery for ${{ github.event.inputs.DEVICE_NAME }} [A14]*
+        
+        🔹 *Device:* \`Redmi 12 5G (sky)\`
+        🔹 *Date:* \`${{ env.BUILD_DATE }}\`
+        🔹 *Variant:* \`A14 (Android 14)\`
+        🔹 *Maintainer:* [Altaf Yafai](https://github.com/AltafYafai)
+        
+        📦 *Build Info:*
+        • [Device Tree](${{ github.event.inputs.DEVICE_TREE }})
+        • Commit: \`${{ env.COMMIT_ID }}\`
+        • Message: \`${{ env.COMMIT_MSG }}\`
+        
+        🔗 [Download from GitHub](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ env.BUILD_DATE }}-${{ github.run_id }})
+        
+        #OrangeFox #Recovery #Sky #Android14"
+        
+        # Upload the ZIP file to Telegram
+        curl -F chat_id="${TG_CHAT_ID}" -F document=@"${ZIP_PATH}" -F caption="${MSG}" -F parse_mode="markdown" https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument
