@@ -57,6 +57,8 @@ jobs:
       FOX_BUILD_TYPE: "Official"
       OF_DEVICE_PATH: "device/xiaomi/sky"
       OF_MANUAL_COPY_TWRES: 1
+      OF_VANILLA_BUILD: 0
+      OF_SKIP_ORANGEFOX_PROCESS: 0
     permissions:
       contents: write
     steps:
@@ -115,6 +117,8 @@ jobs:
         git clone https://github.com/wojtekojtek/leaked_bootable_recovery.git -b fox_12.1_dev_svg bootable/recovery
         # Patch theme selection to bypass Soong bootstrap error
         sed -i 's/func determineTheme(ctx android.BaseContext) string {/func determineTheme(ctx android.BaseContext) string { return "portrait_hdpi"; /' bootable/recovery/gui/libguitwrp_defaults.go
+        # Disable forced vanilla build for Virtual A/B devices
+        sed -i 's/OF_VANILLA_BUILD := 1/OF_VANILLA_BUILD := 0/g' bootable/recovery/orangefox.mk
 
     - name: Clone Device Tree
       run: |
