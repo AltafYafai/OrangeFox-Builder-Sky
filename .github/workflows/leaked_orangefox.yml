@@ -1,0 +1,246 @@
+name: OrangeFox Build (Leaked)
+
+on:
+  workflow_dispatch:
+    inputs:
+      MANIFEST_BRANCH:
+        description: 'OrangeFox Manifest Branch'
+        required: true
+        default: '12.1'
+        type: choice
+        options:
+        - 12.1
+        - 11.0
+      DEVICE_TREE:
+        description: 'Custom Recovery Tree'
+        required: true
+        default: 'https://github.com/AltafYafai/device_xiaomi_sky-recovery'
+      DEVICE_TREE_BRANCH:
+        description: 'Custom Recovery Tree Branch'
+        required: true
+        default: 'ofox-12.1'
+      DEVICE_PATH:
+        description: 'Specify your device path.'
+        required: true
+        default: 'device/xiaomi/sky'
+      DEVICE_NAME:
+        description: 'Specify your Device Codename.'
+        required: true
+        default: 'sky'
+      BUILD_TARGET:
+        description: 'Specify your Build Target'
+        required: true
+        default: 'recovery'
+        type: choice
+        options:
+        - recovery
+        - boot
+        - vendorboot
+
+jobs:
+  build:
+    name: Build OrangeFox for ${{ github.event.inputs.DEVICE_NAME }}
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      DEVICE: ${{ github.event.inputs.DEVICE_NAME }}
+      BRANCH: ${{ github.event.inputs.MANIFEST_BRANCH }}
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Notify Build Started
+      run: |
+        MSG="🚀 *Leaked OrangeFox Build Started*
+        
+        📱 *Device:* \`${{ env.DEVICE }}\`
+        🌳 *Manifest:* \`OrangeFox-${{ env.BRANCH }}\`
+        🦊 *Recovery Source:* \`Leaked (wojtekojtek)\`
+        
+        🕒 *Status:* \`Initializing Environment...\`
+        🔗 [View Live Logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+        
+        if [ -n "$TG_BOT_TOKEN" ]; then
+          curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TG_CHAT_ID}" \
+            -d "parse_mode=markdown" \
+            -d "text=${MSG}" \
+            -d "disable_web_page_preview=true"
+        fi
+
+    - name: Clean-up
+      uses: rokibhasansagar/slimhub_actions@main
+
+    - name: Swap Space
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 16
+
+    - name: Build Environment
+      run: |
+        sudo apt update
+        sudo apt install aria2 curl git ninja-build bc -y
+        git clone https://gitlab.com/OrangeFox/misc/scripts
+        cd scripts
+        sudo bash setup/android_build_env.sh
+
+    - name: Set-up Manifest
+      run: |
+        # Notify Sync
+        MSG="🧬 *Syncing OrangeFox Sources*
+        
+        🕒 *Status:* \`Pulling Manifest & Patches...\`
+        🔗 [View Progress](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+        if [ -n "$TG_BOT_TOKEN" ]; then
+          curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" -d "chat_id=${TG_CHAT_ID}" -d "parse_mode=markdown" -d "text=${MSG}" -d "disable_web_page_preview=true"
+        fi
+        
+        mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
+        cd ${GITHUB_WORKSPACE}/OrangeFox
+        git config --global user.name "altafyafai"
+        git config --global user.email "altaf.alu@gmail.com"
+        git clone https://gitlab.com/OrangeFox/sync.git
+        cd sync
+        ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
+
+    - name: Sync Leaked Recovery
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
+        rm -rf bootable/recovery
+        git clone https://github.com/wojtekojtek/leaked_bootable_recovery.git -b fox_12.1_dev_svg bootable/recovery
+
+    - name: Clone Device Tree
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
+        git clone ${{ github.event.inputs.DEVICE_TREE }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
+        cd ${{ github.event.inputs.DEVICE_PATH }}
+        echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
+        echo "COMMIT_MSG=$(git log -1 --pretty=%B | head -n 1)" >> $GITHUB_ENV
+
+    - name: Building OrangeFox
+      run: |
+        # Notify Build
+        MSG="🏗️ *Starting Compilation*
+        
+        🕒 *Status:* \`Building ${{ github.event.inputs.BUILD_TARGET }}image...\`
+        📝 *Latest Commit:* \`${{ env.COMMIT_MSG }}\`
+        🔗 [View Live Console](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+        if [ -n "$TG_BOT_TOKEN" ]; then
+          curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" -d "chat_id=${TG_CHAT_ID}" -d "parse_mode=markdown" -d "text=${MSG}" -d "disable_web_page_preview=true"
+        fi
+        
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
+        set +e
+        source build/envsetup.sh
+        export ALLOW_MISSING_DEPENDENCIES=true
+        export WITHOUT_CHECKBUILD=true
+        export LC_ALL=C
+        # OrangeFox Build Flags
+        export FOX_VERSION="R11.1_Leaked"
+        export FOX_BUILD_TYPE="Unofficial"
+        export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
+        export OF_MAINTAINER="AltafYafai"
+        export FOX_VIRTUAL_AB_DEVICE=1
+        export OF_AB_DEVICE_WITH_RECOVERY_PARTITION=1
+        set -e
+        lunch fox_${{ github.event.inputs.DEVICE_NAME }}-eng
+        make clean
+        # Build both recovery and vendor_boot for modern Xiaomi devices
+        mka adbd ${{ github.event.inputs.BUILD_TARGET }}image vendorbootimage
+
+    - name: Set Build Date
+      run: |
+        echo "BUILD_DATE=$(TZ=Asia/Kolkata date +%Y%m%d)" >> $GITHUB_ENV
+
+    - name: Prepare Artifacts
+      id: prep
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/
+        mkdir -p ${GITHUB_WORKSPACE}/artifacts/
+        
+        # Log available files for debugging
+        echo "--- Build Output ---"
+        ls -lh
+        
+        # Copy raw images
+        for img in recovery.img boot.img vendor_boot.img; do
+          if [ -f "$img" ]; then
+            cp "$img" ${GITHUB_WORKSPACE}/artifacts/
+          fi
+        done
+        
+        # Find and copy OrangeFox Zip
+        # If zip is too small (e.g. < 30MB), it might be missing the image.
+        ZIP_FILE=$(ls OrangeFox*.zip | head -n 1)
+        if [ -n "$ZIP_FILE" ]; then
+          cp "$ZIP_FILE" ${GITHUB_WORKSPACE}/artifacts/OrangeFox-Leaked-${{ github.event.inputs.DEVICE_NAME }}.zip
+          echo "ZIP_FOUND=true" >> $GITHUB_OUTPUT
+        fi
+        
+        IMG_FILE=$(ls OrangeFox*.img | head -n 1)
+        if [ -n "$IMG_FILE" ]; then
+          cp "$IMG_FILE" ${GITHUB_WORKSPACE}/artifacts/OrangeFox-Leaked-${{ github.event.inputs.DEVICE_NAME }}.img
+        fi
+        
+        if [ "$(ls -A ${GITHUB_WORKSPACE}/artifacts/)" ]; then
+          echo "FILES_FOUND=true" >> $GITHUB_OUTPUT
+          [ -f "${GITHUB_WORKSPACE}/artifacts/OrangeFox-Leaked-${{ github.event.inputs.DEVICE_NAME }}.zip" ] && echo "ZIP_PATH=${GITHUB_WORKSPACE}/artifacts/OrangeFox-Leaked-${{ github.event.inputs.DEVICE_NAME }}.zip" >> $GITHUB_ENV
+        else
+          echo "FILES_FOUND=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Upload Release
+      if: steps.prep.outputs.FILES_FOUND == 'true'
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ${{ github.workspace }}/artifacts/*
+        name: OrangeFox Recovery (Leaked) for ${{ github.event.inputs.DEVICE_NAME }}
+        tag_name: leaked-${{ env.BUILD_DATE }}-${{ github.run_id }}
+        body: |
+          # 🦊 OrangeFox Recovery Project (Leaked Source)
+          
+          **Device:** `${{ github.event.inputs.DEVICE_NAME }}`
+          **Build Date:** `${{ env.BUILD_DATE }}`
+          **Recovery Source:** [wojtekojtek/leaked_bootable_recovery](https://github.com/wojtekojtek/leaked_bootable_recovery)
+          
+          ---
+          
+          ### 🛠 Build Information
+          - **Commit ID:** `${{ env.COMMIT_ID }}`
+          - **Commit Message:** `${{ env.COMMIT_MSG }}`
+          
+          ### 📥 Downloads
+          - **GitHub Releases:** [Click Here](${{ github.server_url }}/${{ github.repository }}/releases/tag/leaked-${{ env.BUILD_DATE }}-${{ github.run_id }})
+
+    - name: Send Final Telegram Notification
+      if: always()
+      run: |
+        if [ -n "$TG_BOT_TOKEN" ]; then
+          if [ "${{ steps.prep.outputs.FILES_FOUND }}" == "true" ]; then
+            MSG="✅ *Build Successful! (Leaked Source)*
+            
+            📱 *Device:* \`${{ env.DEVICE }}\`
+            
+            🔗 [Download from GitHub](${{ github.server_url }}/${{ github.repository }}/releases/tag/leaked-${{ env.BUILD_DATE }}-${{ github.run_id }})
+            
+            #OrangeFox #Leaked #Success"
+            if [ "${{ steps.prep.outputs.ZIP_FOUND }}" == "true" ]; then
+               curl -F chat_id="${TG_CHAT_ID}" -F document=@"${ZIP_PATH}" -F caption="${MSG}" -F parse_mode="markdown" https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument
+            else
+               curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" -d "chat_id=${TG_CHAT_ID}" -d "parse_mode=markdown" -d "text=${MSG}"
+            fi
+          else
+            MSG="❌ *Build Failed! (Leaked Source)*
+            
+            📱 *Device:* \`${{ env.DEVICE }}\`
+            🕒 *Status:* \`Compilation Error\`
+            
+            🔍 Check the logs to fix the issue.
+            🔗 [View Logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" -d "chat_id=${TG_CHAT_ID}" -d "parse_mode=markdown" -d "text=${MSG}"
+          fi
+        fi
