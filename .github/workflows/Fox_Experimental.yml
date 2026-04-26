@@ -50,6 +50,11 @@ jobs:
       TW_THEME: portrait_hdpi
       TARGET_SCREEN_WIDTH: 1080
       TARGET_SCREEN_HEIGHT: 2460
+      FOX_BUILD_DEVICE: sky
+      OF_MAINTAINER: "AltafYafai"
+      FOX_VERSION: "R12.1_1"
+      FOX_BUILD_TYPE: "Official"
+      OF_DEVICE_PATH: "device/xiaomi/sky"
     permissions:
       contents: write
     steps:
@@ -117,6 +122,16 @@ jobs:
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
         echo "COMMIT_MSG=$(git log -1 --pretty=%B | head -n 1)" >> $GITHUB_ENV
 
+    - name: Verify Environment
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
+        echo "Checking for device tree..."
+        ls -d device/xiaomi/sky || echo "Device tree NOT found at expected path!"
+        echo "Checking for vendor recovery..."
+        ls -d vendor/recovery || echo "Vendor recovery NOT found at expected path!"
+        echo "Current Workspace Content:"
+        ls -F
+
     - name: Building OrangeFox
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
@@ -124,9 +139,6 @@ jobs:
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         export WITHOUT_CHECKBUILD=true
-        export FOX_BUILD_DEVICE=sky
-        export OF_MAINTAINER="AltafYafai"
-        export FOX_VERSION="R11.3"
         export LC_ALL="C"
         
         # Load device-specific environment variables
