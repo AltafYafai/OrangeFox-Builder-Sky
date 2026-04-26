@@ -102,6 +102,17 @@ jobs:
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         export LC_ALL="C"
+        
+        # Load device-specific environment variables
+        if [ -f device/xiaomi/sky/vendorsetup.sh ]; then
+          source device/xiaomi/sky/vendorsetup.sh
+        fi
+        
+        # Mandatory theme settings if not set by device tree
+        export TW_THEME="portrait_hdpi"
+        export TARGET_SCREEN_WIDTH=1080
+        export TARGET_SCREEN_HEIGHT=2460
+        
         set -e
         lunch ${{ github.event.inputs.MAKEFILE_NAME }}-${{ github.event.inputs.DEVICE_NAME }}-eng || lunch ${{ github.event.inputs.MAKEFILE_NAME }}-eng
         make clean
