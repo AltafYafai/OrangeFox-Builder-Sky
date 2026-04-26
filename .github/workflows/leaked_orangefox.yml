@@ -140,7 +140,6 @@ jobs:
         export WITHOUT_CHECKBUILD=true
         export LC_ALL=C
         # OrangeFox Build Flags
-        export FOX_VERSION="R11.1_Leaked"
         export FOX_BUILD_TYPE="Unofficial"
         export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
         export OF_MAINTAINER="AltafYafai"
