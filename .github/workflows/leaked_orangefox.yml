@@ -111,7 +111,7 @@ jobs:
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         rm -rf bootable/recovery
-        git clone https://github.com/wojtekojtek/leaked_bootable_recovery -b fox_12.1_dev_svg bootable/recovery
+        git clone https://github.com/wojtekojtek/leaked_bootable_recovery.git -b fox_12.1_dev_svg bootable/recovery
 
     - name: Clone Device Tree
       run: |
