@@ -124,6 +124,10 @@ jobs:
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         export WITHOUT_CHECKBUILD=true
+        export FOX_BUILD_DEVICE=sky
+        export OF_MAINTAINER="AltafYafai"
+        export FOX_VERSION="R11.3"
+        export LC_ALL="C"
         
         # Load device-specific environment variables
         if [ -f device/xiaomi/sky/vendorsetup.sh ]; then
@@ -133,7 +137,7 @@ jobs:
         set -e
         lunch fox_${{ github.event.inputs.DEVICE_NAME }}-eng
         make clean
-        mka adbd ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
+        mka ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
 
     - name: Set Build Date
       run: |
