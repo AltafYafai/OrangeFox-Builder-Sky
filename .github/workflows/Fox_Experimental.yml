@@ -106,6 +106,8 @@ jobs:
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         rm -rf bootable/recovery
         git clone https://github.com/wojtekojtek/leaked_bootable_recovery.git -b fox_12.1_dev_svg bootable/recovery
+        # Patch theme selection to bypass Soong bootstrap error
+        sed -i 's/func determineTheme(ctx android.BaseContext) string {/func determineTheme(ctx android.BaseContext) string { return "portrait_hdpi"; /' bootable/recovery/gui/libguitwrp_defaults.go
 
     - name: Clone Device Tree
       run: |
