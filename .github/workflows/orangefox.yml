@@ -136,6 +136,12 @@ jobs:
         export OF_MAINTAINER="AltafYafai"
         export FOX_VIRTUAL_AB_DEVICE=1
         export OF_AB_DEVICE_WITH_RECOVERY_PARTITION=1
+        # Theme and Screen Fixes
+        export TW_THEME="portrait_hdpi"
+        export TARGET_SCREEN_WIDTH=1080
+        export TARGET_SCREEN_HEIGHT=2460
+        export OF_SCREEN_H=2460
+        export FOX_DRAWER_OUTLINE_COMMON=1
         set -e
         lunch fox_${{ github.event.inputs.DEVICE_NAME }}-eng
         make clean
