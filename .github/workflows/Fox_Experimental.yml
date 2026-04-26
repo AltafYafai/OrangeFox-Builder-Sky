@@ -47,6 +47,9 @@ jobs:
       TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
       DEVICE: ${{ github.event.inputs.DEVICE_NAME }}
       BRANCH: ${{ github.event.inputs.MANIFEST_BRANCH }}
+      TW_THEME: portrait_hdpi
+      TARGET_SCREEN_WIDTH: 1080
+      TARGET_SCREEN_HEIGHT: 2460
     permissions:
       contents: write
     steps:
@@ -124,11 +127,6 @@ jobs:
         if [ -f device/xiaomi/sky/vendorsetup.sh ]; then
           source device/xiaomi/sky/vendorsetup.sh
         fi
-        
-        # Ensure mandatory variables for leaked source
-        export TW_THEME="portrait_hdpi"
-        export TARGET_SCREEN_WIDTH=1080
-        export TARGET_SCREEN_HEIGHT=2460
         
         set -e
         lunch fox_${{ github.event.inputs.DEVICE_NAME }}-eng
