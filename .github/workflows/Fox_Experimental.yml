@@ -34,7 +34,7 @@ on:
       MAKEFILE_NAME:
         description: 'MAKEFILE_NAME'
         required: true
-        default: 'fox_sky'
+        default: 'twrp_sky'
       BUILD_TARGET:
         description: 'BUILD_TARGET'
         required: true
@@ -101,8 +101,12 @@ jobs:
         set +e
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
+        export FOX_BUILD_DEVICE=${{ github.event.inputs.DEVICE_NAME }}
+        export LC_ALL="C"
         set -e
-        lunch ${{ github.event.inputs.MAKEFILE_NAME }}-eng && make clean && mka adbd ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
+        lunch ${{ github.event.inputs.MAKEFILE_NAME }}-${{ github.event.inputs.DEVICE_NAME }}-eng || lunch ${{ github.event.inputs.MAKEFILE_NAME }}-eng
+        make clean
+        mka adbd ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
       continue-on-error: true
 
