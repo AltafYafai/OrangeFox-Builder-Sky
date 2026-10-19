@@ -184,15 +184,23 @@ jobs:
       - name: Build external modules
         run: |
           set -euxo pipefail
+          # vendor/lineage build/kernel/kernel.mk computes
+          #   rpath = os.path.relpath(TARGET_KERNEL_EXT_MODULE_ROOT, KERNEL_SRC)
+          # and calls "make -C <moduledir> M=<rpath>/<module>". The module
+          # Kbuilds use -I$(srctree)/$(src)/..., which only resolves when M is
+          # relative to the kernel source tree (absolute M breaks it).
+          rpath=$(python3 -c 'import os,sys;print(os.path.relpath(sys.argv[1], sys.argv[2]))' \
+                            "$WS/sm4450-modules" "$WS/kernel")
+          echo "module rpath: $rpath"
           # Order matters: display-drivers/msm links against the Module.symvers
           # of all the other directories.
           EXT_LIST="xiaomi qcom/opensource/mm-drivers/sync_fence qcom/opensource/mm-drivers/msm_ext_display qcom/opensource/mmrm-driver qcom/opensource/securemsm-kernel qcom/opensource/synx-kernel qcom/opensource/display-drivers/msm"
           for m in $EXT_LIST; do
             DIR="$WS/sm4450-modules/$m"
             echo "== Building external module: $m"
-            make -C "$DIR" M="$DIR" KERNEL_SRC="$WS/kernel" OUT_DIR="$OUT" O="$OUT" \
+            make -C "$DIR" M="$rpath/$m" KERNEL_SRC="$WS/kernel" OUT_DIR="$OUT" O="$OUT" \
                  $KFLAGS -j$(nproc) modules
-            make -C "$DIR" M="$DIR" KERNEL_SRC="$WS/kernel" OUT_DIR="$OUT" O="$OUT" \
+            make -C "$DIR" M="$rpath/$m" KERNEL_SRC="$WS/kernel" OUT_DIR="$OUT" O="$OUT" \
                  $KFLAGS INSTALL_MOD_PATH="$STAGE" INSTALL_MOD_STRIP=1 modules_install
           done
 
