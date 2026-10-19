@@ -181,10 +181,12 @@ def main():
         raise SystemExit('need --fragment or --fragment-from')
 
     out, info = build(base, frag, args.fragment_name)
-    if args.pad_to:
-        if len(out) > args.pad_to:
-            raise SystemExit(f'image grew to {len(out)} bytes, more than --pad-to {args.pad_to}')
-        out += b'\0' * (args.pad_to - len(out))
+    target = args.pad_to or len(base_data)
+    if len(out) > target:
+        print(f'note: image is {len(out)} bytes, larger than {target}; '
+              f'flashing it is still fine as long as it fits the partition')
+    else:
+        out += b'\0' * (target - len(out))
 
     open(args.output, 'wb').write(out)
 
@@ -193,6 +195,8 @@ def main():
         print(f'  entry {e["name"]!r:<12} type={e["type"]} size={e["size"]} offset={e["offset"]}')
     print(f'replaced {info["replaced"]} fragment(s) named {args.fragment_name!r}')
     print(f'wrote {args.output} ({len(out)} bytes)')
+    print('note: any AVB/vbmeta trailer from the base image is not copied (it would be '
+          'stale for the modified image anyway); flash on an unlocked bootloader')
 
 
 if __name__ == '__main__':
