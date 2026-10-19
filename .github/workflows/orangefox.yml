@@ -176,7 +176,7 @@ jobs:
         export OF_SCREEN_H=2460
         export FOX_DRAWER_OUTLINE_COMMON=1
         set -e
-        lunch fox_${{ github.event.inputs.DEVICE_NAME }}-eng
+        lunch twrp_${{ github.event.inputs.DEVICE_NAME }}-eng
         make clean
         # Build both recovery and vendor_boot
         mka adbd ${{ github.event.inputs.BUILD_TARGET }}image vendorbootimage
