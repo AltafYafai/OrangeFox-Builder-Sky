@@ -18,7 +18,19 @@ on:
       DEVICE_TREE_BRANCH:
         description: 'Custom Recovery Tree Branch'
         required: true
-        default: 'ofox-12.1'
+        default: 'fox12.1-lineage24'
+      KERNEL_RELEASE_REPO:
+        description: 'Repo (owner/name) that hosts the prebuilt kernel release'
+        required: true
+        default: 'AltafYafai/OrangeFox-Builder-Sky'
+      KERNEL_RELEASE_TAG:
+        description: 'Release tag of the prebuilt 6.6 kernel'
+        required: true
+        default: 'kernel-6.6'
+      KERNEL_ASSET:
+        description: 'Kernel release asset name'
+        required: true
+        default: 'kernel-6.6-sky.tar.gz'
       DEVICE_PATH:
         description: 'Specify your device path.'
         required: true
@@ -113,6 +125,28 @@ jobs:
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
         echo "COMMIT_MSG=$(git log -1 --pretty=%B | head -n 1)" >> $GITHUB_ENV
 
+    - name: Inject prebuilt 6.6 kernel
+      run: |
+        set -e
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
+        gh release download "${{ github.event.inputs.KERNEL_RELEASE_TAG }}" \
+          --repo "${{ github.event.inputs.KERNEL_RELEASE_REPO }}" \
+          --pattern "${{ github.event.inputs.KERNEL_ASSET }}" \
+          --output ${GITHUB_WORKSPACE}/kernel.tar.gz --clobber
+        mkdir -p ${GITHUB_WORKSPACE}/kernel
+        tar -xzf ${GITHUB_WORKSPACE}/kernel.tar.gz -C ${GITHUB_WORKSPACE}/kernel
+        DEV=${{ github.event.inputs.DEVICE_PATH }}
+        cp ${GITHUB_WORKSPACE}/kernel/kernel-6.6-sky/Image $DEV/prebuilt/kernel
+        cp ${GITHUB_WORKSPACE}/kernel/kernel-6.6-sky/dtb $DEV/prebuilt/dtb
+        mkdir -p $DEV/prebuilt/modules
+        rm -f $DEV/prebuilt/modules/*.ko
+        cp ${GITHUB_WORKSPACE}/kernel/kernel-6.6-sky/modules/* $DEV/prebuilt/modules/
+        echo "--- Injected kernel artifacts ---"
+        ls -la $DEV/prebuilt/
+        echo "Modules: $(ls $DEV/prebuilt/modules/*.ko | wc -l)"
+        echo "Module load list: $(wc -l < $DEV/prebuilt/modules/modules.load) entries"
+        test -s $DEV/prebuilt/kernel -a -s $DEV/prebuilt/dtb -a -s $DEV/prebuilt/modules/modules.load
+
     - name: Building OrangeFox
       run: |
         # Notify Build
@@ -192,14 +226,15 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: ${{ github.workspace }}/artifacts/*
-        name: OrangeFox Recovery for ${{ github.event.inputs.DEVICE_NAME }} [A14]
+        name: OrangeFox Recovery for ${{ github.event.inputs.DEVICE_NAME }} [A17]
         tag_name: ${{ env.BUILD_DATE }}-${{ github.run_id }}
         body: |
-          # 🦊 OrangeFox Recovery Project [A14]
+          # 🦊 OrangeFox Recovery Project [A17]
           
           **Device:** Redmi 12 5G / Poco M6 Pro 5G / Redmi Note 12R (`${{ github.event.inputs.DEVICE_NAME }}`)
           **Build Date:** `${{ env.BUILD_DATE }}`
-          **Variant:** `A14 (Android 14)`
+          **Variant:** `A17 (Android 17 / LineageOS 24)`
+          **Kernel:** `Linux 6.6 (xiaomi-ravelin lineage-24.0)`
           **Maintainer:** [Altaf Yafai](https://github.com/AltafYafai)
           
           ---
@@ -222,7 +257,7 @@ jobs:
           
           🔗 [Download from GitHub](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ env.BUILD_DATE }}-${{ github.run_id }})
           
-          #OrangeFox #Success #Sky #A14"
+          #OrangeFox #Success #Sky #A17"
           if [ "${{ steps.prep.outputs.ZIP_FOUND }}" == "true" ]; then
              curl -F chat_id="${TG_CHAT_ID}" -F document=@"${ZIP_PATH}" -F caption="${MSG}" -F parse_mode="markdown" https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument
           else

@@ -1,0 +1,238 @@
+name: Build Kernel 6.6 [sky]
+
+# Builds the Linux 6.6 kernel (LineageOS 24 / xiaomi-ravelin trees) together with
+# the DTBs and the kernel modules that OrangeFox needs, and publishes them as a
+# release asset (kernel-6.6-sky.tar.gz) that the OrangeFox workflow consumes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      KERNEL_REPO:
+        description: 'Kernel repo (owner/name)'
+        required: true
+        default: 'xiaomi-ravelin/android_kernel_xiaomi_sm4450'
+      DEVICETREES_REPO:
+        description: 'Devicetrees repo (owner/name)'
+        required: true
+        default: 'xiaomi-ravelin/android_kernel_xiaomi_sm4450-devicetrees'
+      MODULES_REPO:
+        description: 'External modules repo (owner/name)'
+        required: true
+        default: 'xiaomi-ravelin/android_kernel_xiaomi_sm4450-modules'
+      COMMON_TREE_REPO:
+        description: 'sm4450-common device tree (owner/name), source of the module lists'
+        required: true
+        default: 'xiaomi-ravelin/android_device_xiaomi_sm4450-common'
+      BRANCH:
+        description: 'Branch to build (used for every repo)'
+        required: true
+        default: 'lineage-24.0'
+      RELEASE_TAG:
+        description: 'Release tag the artifacts are published to'
+        required: true
+        default: 'kernel-6.6'
+
+env:
+  WS: ${{ github.workspace }}/ws
+  OUT: ${{ github.workspace }}/ws/out
+  STAGE: ${{ github.workspace }}/ws/stage
+  CLANG_DIR: ${{ github.workspace }}/ws/clang
+
+jobs:
+  build:
+    name: Build kernel + DTBs + modules
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+                      /usr/local/.ghcup /usr/share/swift
+          sudo apt-get clean
+          df -h /
+
+      - name: Swap space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 12
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev python3 \
+                                  kmod cpio rsync zip unzip dwarves
+
+      - name: Clone sources
+        run: |
+          set -euxo pipefail
+          mkdir -p "$WS"
+          git clone --depth=1 -b "${{ github.event.inputs.BRANCH }}" \
+              "https://github.com/${{ github.event.inputs.KERNEL_REPO }}.git" "$WS/kernel"
+          git clone --depth=1 -b "${{ github.event.inputs.BRANCH }}" \
+              "https://github.com/${{ github.event.inputs.DEVICETREES_REPO }}.git" "$WS/sm4450-devicetrees"
+          git clone --depth=1 -b "${{ github.event.inputs.BRANCH }}" \
+              "https://github.com/${{ github.event.inputs.MODULES_REPO }}.git" "$WS/sm4450-modules"
+          git clone --depth=1 -b "${{ github.event.inputs.BRANCH }}" \
+              "https://github.com/${{ github.event.inputs.COMMON_TREE_REPO }}.git" "$WS/sm4450-common"
+          du -sh "$WS"/*
+
+      - name: Download Clang r510928
+        run: |
+          set -euxo pipefail
+          URLS="
+          https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android15-release/clang-r510928.tar.gz
+          https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-15.0.0_r3/clang-r510928.tar.gz
+          "
+          ok=""
+          for u in $URLS; do
+            echo "Downloading $u"
+            if curl -fL --retry 8 --retry-delay 15 --retry-all-errors \
+                    -o "$WS/clang.tar.gz" "$u"; then ok=1; break; fi
+          done
+          [ -n "$ok" ] || { echo "ERROR: could not download clang"; exit 1; }
+          mkdir -p "$CLANG_DIR"
+          tar -xzf "$WS/clang.tar.gz" -C "$CLANG_DIR"
+          "$CLANG_DIR/bin/clang" --version
+
+      - name: Setup build environment
+        run: |
+          set -euxo pipefail
+          export PATH="$CLANG_DIR/bin:$PATH"
+          mkdir -p "$OUT" "$STAGE"
+          echo "$CLANG_DIR/bin" >> $GITHUB_PATH
+          echo "KFLAGS=ARCH=arm64 CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- STRIP=llvm-strip CONFIG_XIAOMI_DEVICE_DTBS=y CONFIG_SKY_DTB=y" >> $GITHUB_ENV
+          "$CLANG_DIR/bin/clang" --version | head -1
+
+      - name: Configure kernel
+        run: |
+          set -euxo pipefail
+          make -C "$WS/kernel" O="$OUT" $KFLAGS gki_defconfig
+          ( cd "$OUT" && "$WS/kernel/scripts/kconfig/merge_config.sh" -m -O "$OUT" "$OUT/.config" \
+              "$WS/kernel/arch/arm64/configs/vendor/parrot_perf.config" )
+          make -C "$WS/kernel" O="$OUT" $KFLAGS olddefconfig
+          grep -E "CONFIG_LOCALVERSION=|CONFIG_MODULE_SIG=|CONFIG_MODVERSIONS=" "$OUT/.config" || true
+
+      - name: Build kernel, DTBs and in-tree modules
+        run: |
+          set -euxo pipefail
+          make -C "$WS/kernel" O="$OUT" $KFLAGS -j$(nproc) Image dtbs modules
+          make -C "$WS/kernel" O="$OUT" $KFLAGS INSTALL_MOD_PATH="$STAGE" INSTALL_MOD_STRIP=1 modules_install
+          echo "kernel release: $(cat $OUT/include/config/kernel.release)"
+          find "$STAGE" -name '*.ko' | wc -l
+
+      - name: Build external modules
+        run: |
+          set -euxo pipefail
+          # Order matters: display-drivers/msm links against the Module.symvers
+          # of all the other directories.
+          EXT_LIST="xiaomi qcom/opensource/mm-drivers/sync_fence qcom/opensource/mm-drivers/msm_ext_display qcom/opensource/mmrm-driver qcom/opensource/securemsm-kernel qcom/opensource/synx-kernel qcom/opensource/display-drivers/msm"
+          for m in $EXT_LIST; do
+            DIR="$WS/sm4450-modules/$m"
+            echo "== Building external module: $m"
+            make -C "$DIR" M="$DIR" KERNEL_SRC="$WS/kernel" OUT_DIR="$OUT" O="$OUT" \
+                 $KFLAGS -j$(nproc) modules
+            make -C "$DIR" M="$DIR" KERNEL_SRC="$WS/kernel" OUT_DIR="$OUT" O="$OUT" \
+                 $KFLAGS INSTALL_MOD_PATH="$STAGE" INSTALL_MOD_STRIP=1 modules_install
+          done
+
+      - name: Assemble kernel package
+        run: |
+          set -euxo pipefail
+          export STAGE OUT WS
+          KREL=$(cat "$OUT/include/config/kernel.release")
+          export MODROOT="$STAGE/lib/modules/$KREL"
+          PKG="$WS/pkg/kernel-6.6-sky"
+          export PKG
+          mkdir -p "$PKG/modules"
+
+          BASE_DTB=$(find "$OUT/arch/arm64/boot/dts" -name 'ravelin-sky-base.dtb' | head -n 1)
+          GB_DTB=$(find "$OUT/arch/arm64/boot/dts" -name 'ravelin-sky-4gb-base.dtb' | head -n 1)
+          [ -n "$BASE_DTB" ] || { echo "ERROR: ravelin-sky-base.dtb not found"; exit 1; }
+          [ -n "$GB_DTB" ]   || { echo "ERROR: ravelin-sky-4gb-base.dtb not found"; exit 1; }
+          cp "$BASE_DTB" "$GB_DTB" "$PKG/"
+          cat "$GB_DTB" "$BASE_DTB" > "$PKG/dtb"
+          cp "$OUT/arch/arm64/boot/Image" "$PKG/Image"
+          echo "Image: $(stat -c%s "$PKG/Image") bytes, dtb: $(stat -c%s "$PKG/dtb") bytes"
+
+          python3 - <<'PY'
+          import os, shutil, sys
+
+          modroot = os.environ['MODROOT']
+          pkg = os.environ['PKG']
+          common = os.environ['WS'] + '/sm4450-common'
+
+          # Every .ko that was built
+          built = {}
+          for root, _dirs, files in os.walk(modroot):
+              for f in files:
+                  if f.endswith('.ko'):
+                      built.setdefault(f, []).append(os.path.join(root, f))
+
+          # Modules to ship: stock recovery list + touch modules
+          names = []
+          with open(common + '/configs/modules/modules.load.recovery') as fh:
+              for line in fh:
+                  line = line.strip()
+                  if line and not line.startswith('#'):
+                      names.append(line)
+          for extra in ('fts_8720.ko', 'nvt_36672c.ko', 'xiaomi_touch.ko'):
+              if extra not in names:
+                  names.append(extra)
+
+          missing = []
+          copied = 0
+          with open(pkg + '/modules/modules.load', 'w') as load:
+              for name in names:
+                  src = built.get(name)
+                  if not src:
+                      missing.append(name)
+                      continue
+                  if len(src) > 1:
+                      print('WARNING: duplicate module', name, src)
+                  shutil.copy2(src[0], os.path.join(pkg, 'modules', name))
+                  load.write(name + '\n')
+                  copied += 1
+
+          print('requested:', len(names), 'copied:', copied, 'missing:', len(missing))
+          if missing:
+              print('MISSING MODULES:')
+              for m in missing:
+                  print('  ', m)
+              sys.exit(1)
+          PY
+
+          ls -la "$PKG"
+          du -sh "$PKG" "$PKG/modules"
+
+      - name: Create package
+        run: |
+          set -euxo pipefail
+          tar -czf "$WS/kernel-6.6-sky.tar.gz" -C "$WS/pkg" kernel-6.6-sky
+          ls -la "$WS/kernel-6.6-sky.tar.gz"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euxo pipefail
+          TAG="${{ github.event.inputs.RELEASE_TAG }}"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+              gh release create "$TAG" --title "Linux 6.6 kernel for sky (LineageOS 24)" \
+                 --notes "Prebuilt Linux 6.6 kernel, DTBs and recovery kernel modules for Xiaomi sky (Redmi 12 5G / POCO M6 Pro 5G / Redmi Note 12R), built from the xiaomi-ravelin lineage-24.0 trees."
+          gh release upload "$TAG" "$WS/kernel-6.6-sky.tar.gz" --clobber
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Kernel build summary"
+            echo ""
+            echo "* Kernel release: \`$(cat "$OUT/include/config/kernel.release" 2>/dev/null || echo n/a)\`"
+            echo "* Modules in package: \`$(ls "$WS/pkg/kernel-6.6-sky/modules" 2>/dev/null | wc -l)\`"
+            echo "* Package size: \`$(du -sh "$WS/kernel-6.6-sky.tar.gz" 2>/dev/null | cut -f1)\`"
+          } >> $GITHUB_STEP_SUMMARY
