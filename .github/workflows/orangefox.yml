@@ -195,8 +195,8 @@ jobs:
         echo "--- Build Output ---"
         ls -lh
         
-        # Copy raw images
-        for img in recovery.img boot.img vendor_boot.img; do
+        # Copy raw images (boot.img is not published - recovery lives in vendor_boot)
+        for img in vendor_boot.img; do
           if [ -f "$img" ]; then
             cp "$img" ${GITHUB_WORKSPACE}/artifacts/
           fi
@@ -212,6 +212,14 @@ jobs:
         IMG_FILE=$(ls OrangeFox*.img | head -n 1)
         if [ -n "$IMG_FILE" ]; then
           cp "$IMG_FILE" ${GITHUB_WORKSPACE}/artifacts/OrangeFox-Unofficial-${{ github.event.inputs.DEVICE_NAME }}.img
+        fi
+        
+        # Extract the TWRP recovery ramdisk fragment, and ship the tool that can
+        # merge it into a stock/ROM vendor_boot image.
+        if [ -f vendor_boot.img ] && [ -f ${GITHUB_WORKSPACE}/tools/merge_vb.py ]; then
+          python3 ${GITHUB_WORKSPACE}/tools/merge_vb.py --extract --fragment-from vendor_boot.img \
+            --fragment-name recovery -o ${GITHUB_WORKSPACE}/artifacts/vendor_boot_recovery_ramdisk.cpio.lz4 || true
+          cp ${GITHUB_WORKSPACE}/tools/merge_vb.py ${GITHUB_WORKSPACE}/artifacts/merge_vb.py
         fi
         
         if [ "$(ls -A ${GITHUB_WORKSPACE}/artifacts/)" ]; then
@@ -243,7 +251,27 @@ jobs:
           - **Commit ID:** `${{ env.COMMIT_ID }}`
           - **Commit Message:** `${{ env.COMMIT_MSG }}`
           
-          ### 📥 Downloads
+          ### 📥 Installation
+          
+          OrangeFox lives in the `vendor_boot` partition: the kernel comes from the installed ROM's own `boot.img`, OrangeFox only adds a `recovery` ramdisk fragment to `vendor_boot`.
+          
+          **Option A - flash the whole vendor_boot image** (use when your ROM kernel is the same build as the one used here - check `uname -r` on the ROM; it must report `6.6.127-4k-gf879c1be9822`):
+          ```sh
+          fastboot flash vendor_boot OrangeFox-Unofficial-${{ github.event.inputs.DEVICE_NAME }}.img
+          fastboot reboot recovery
+          ```
+          
+          **Option B - keep your ROM's vendor ramdisk** (recommended when the kernel differs): splice only the OrangeFox ramdisk into your own vendor_boot.img:
+          ```sh
+          python3 merge_vb.py --base vendor_boot.img --fragment-from OrangeFox-Unofficial-${{ github.event.inputs.DEVICE_NAME }}.img -o vendor_boot_orangefox.img
+          fastboot flash vendor_boot vendor_boot_orangefox.img
+          ```
+          
+          **Option C - update from inside OrangeFox**: install the zip from the OrangeFox recovery itself.
+          
+          **Recovering**: if anything goes wrong, flash your ROM's original `vendor_boot.img` back.
+          
+          ### 📦 Downloads
           - **GitHub Releases:** [Click Here](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ env.BUILD_DATE }}-${{ github.run_id }})
 
     - name: Send Final Telegram Notification
