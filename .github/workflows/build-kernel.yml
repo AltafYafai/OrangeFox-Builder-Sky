@@ -65,7 +65,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison flex libssl-dev libelf-dev python3 \
-                                  kmod cpio rsync zip unzip dwarves
+                                  kmod cpio rsync zip unzip dwarves device-tree-compiler
+          # fdtget/fdtput/fdtoverlay are needed by merge_dtbs.py
+          for t in fdtget fdtput fdtoverlay; do
+            command -v "$t" >/dev/null || { echo "ERROR: $t not available"; exit 1; }
+          done
 
       - name: Clone sources
         run: |
@@ -79,6 +83,12 @@ jobs:
               "https://github.com/${{ github.event.inputs.MODULES_REPO }}.git" "$WS/sm4450-modules"
           git clone --depth=1 -b "${{ github.event.inputs.BRANCH }}" \
               "https://github.com/${{ github.event.inputs.COMMON_TREE_REPO }}.git" "$WS/sm4450-common"
+          # Qualcomm DTB merge script, same one vendor/lineage uses when
+          # BOARD_USES_QCOM_MERGE_DTBS_SCRIPT is set.
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+              -o "$WS/merge_dtbs.py" \
+              "https://raw.githubusercontent.com/LineageOS/android_vendor_lineage/lineage-24.0/build/tools/merge_dtbs.py"
+          head -3 "$WS/merge_dtbs.py"
           du -sh "$WS"/*
 
       - name: Download Clang r510928
@@ -105,7 +115,7 @@ jobs:
           export PATH="$CLANG_DIR/bin:$PATH"
           mkdir -p "$OUT" "$STAGE"
           echo "$CLANG_DIR/bin" >> $GITHUB_PATH
-          echo "KFLAGS=ARCH=arm64 CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- STRIP=llvm-strip CONFIG_XIAOMI_DEVICE_DTBS=y CONFIG_SKY_DTB=y" >> $GITHUB_ENV
+          echo "KFLAGS=ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CONFIG_XIAOMI_DEVICE_DTBS=y CONFIG_SKY_DTB=y" >> $GITHUB_ENV
           "$CLANG_DIR/bin/clang" --version | head -1
 
       - name: Configure kernel
@@ -117,10 +127,56 @@ jobs:
           make -C "$WS/kernel" O="$OUT" $KFLAGS olddefconfig
           grep -E "CONFIG_LOCALVERSION=|CONFIG_MODULE_SIG=|CONFIG_MODVERSIONS=" "$OUT/.config" || true
 
-      - name: Build kernel, DTBs and in-tree modules
+      - name: Build DTBs
         run: |
           set -euxo pipefail
-          make -C "$WS/kernel" O="$OUT" $KFLAGS -j$(nproc) Image dtbs modules
+          make -C "$WS/kernel" O="$OUT" $KFLAGS -j$(nproc) dtbs
+
+      - name: Merge techpack overlays into sky base DTBs
+        run: |
+          set -euxo pipefail
+          DTS_VENDOR="$OUT/arch/arm64/boot/dts/vendor"
+          MERGE="$WS/dtbmerge"
+          rm -rf "$MERGE"
+          mkdir -p "$MERGE/stash" "$MERGE/base" "$MERGE/out"
+
+          echo "== DTBs produced by make dtbs =="
+          find "$DTS_VENDOR" \( -name '*.dtb' -o -name '*.dtbo' \) | sort
+          echo "dtb: $(find "$DTS_VENDOR" -name '*.dtb' | wc -l)  dtbo: $(find "$DTS_VENDOR" -name '*.dtbo' | wc -l)"
+
+          # Mirror vendor/lineage build/kernel/kernel.mk with
+          # BOARD_USES_QCOM_MERGE_DTBS_SCRIPT=true: every top-level
+          # vendor/qcom/*.dtb|*.dtbo is a "base", everything below it
+          # (vendor/qcom/<techpack>/...) is a techpack dlkm overlay that gets
+          # merged into the matching base. The vendor_boot dtb section of the
+          # ROM contains these merged bases, so recovery must carry them too.
+          mv "$DTS_VENDOR"/qcom/*.dtb "$DTS_VENDOR"/qcom/*.dtbo "$MERGE/stash"/
+          cp "$MERGE/stash/ravelin-sky-base.dtb" "$MERGE/stash/ravelin-sky-4gb-base.dtb" "$MERGE/base/"
+
+          export PATH="$OUT/scripts/dtc:$PATH"
+          python3 "$WS/merge_dtbs.py" --base "$MERGE/base" --techpack "$DTS_VENDOR" --out "$MERGE/out"
+
+          echo "== merged output =="
+          ls -la "$MERGE/out"
+          for f in "$MERGE"/out/*.dtb; do echo "$(stat -c%s "$f") $f"; done
+          ls "$MERGE"/out/*.dtb >/dev/null
+          # "qcom,sde-rsc-rpmh" only exists in the display techpack overlay;
+          # its presence proves the merge actually applied the techpacks.
+          grep -aq "sde-rsc-rpmh" "$MERGE"/out/*.dtb || { echo "ERROR: merged DTBs lack display techpack content"; exit 1; }
+
+      - name: Upload DTB debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dtbs-6.6-sky-debug
+          path: ws/dtbmerge
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Build kernel and in-tree modules
+        run: |
+          set -euxo pipefail
+          make -C "$WS/kernel" O="$OUT" $KFLAGS -j$(nproc) Image modules
           make -C "$WS/kernel" O="$OUT" $KFLAGS INSTALL_MOD_PATH="$STAGE" INSTALL_MOD_STRIP=1 modules_install
           echo "kernel release: $(cat $OUT/include/config/kernel.release)"
           find "$STAGE" -name '*.ko' | wc -l
@@ -150,14 +206,19 @@ jobs:
           export PKG
           mkdir -p "$PKG/modules"
 
-          BASE_DTB=$(find "$OUT/arch/arm64/boot/dts" -name 'ravelin-sky-base.dtb' | head -n 1)
-          GB_DTB=$(find "$OUT/arch/arm64/boot/dts" -name 'ravelin-sky-4gb-base.dtb' | head -n 1)
-          [ -n "$BASE_DTB" ] || { echo "ERROR: ravelin-sky-base.dtb not found"; exit 1; }
-          [ -n "$GB_DTB" ]   || { echo "ERROR: ravelin-sky-4gb-base.dtb not found"; exit 1; }
-          cp "$BASE_DTB" "$GB_DTB" "$PKG/"
-          cat "$GB_DTB" "$BASE_DTB" > "$PKG/dtb"
+          MERGED="$WS/dtbmerge/out"
+          [ -d "$MERGED" ] || { echo "ERROR: merged DTB folder $MERGED missing"; exit 1; }
+          GB_DTBS=$(ls "$MERGED"/ravelin-sky-4gb-base*.dtb 2>/dev/null | sort || true)
+          BASE_DTBS=$(ls "$MERGED"/ravelin-sky-base*.dtb 2>/dev/null | sort || true)
+          [ -n "$GB_DTBS" ]   || { echo "ERROR: merged ravelin-sky-4gb-base.dtb not found in $MERGED"; exit 1; }
+          [ -n "$BASE_DTBS" ] || { echo "ERROR: merged ravelin-sky-base.dtb not found in $MERGED"; exit 1; }
+          mkdir -p "$PKG/dtbs"
+          cp "$MERGED"/*.dtb "$PKG/dtbs/"
+          cat $GB_DTBS $BASE_DTBS > "$PKG/dtb"
+          grep -aq "sde-rsc-rpmh" "$PKG/dtb" || { echo "ERROR: merged DTBs lack display techpack content"; exit 1; }
           cp "$OUT/arch/arm64/boot/Image" "$PKG/Image"
           echo "Image: $(stat -c%s "$PKG/Image") bytes, dtb: $(stat -c%s "$PKG/dtb") bytes"
+          echo "dtb merged from:"; echo "$GB_DTBS"; echo "$BASE_DTBS"
 
           python3 - <<'PY'
           import os, shutil, sys
@@ -234,5 +295,6 @@ jobs:
             echo ""
             echo "* Kernel release: \`$(cat "$OUT/include/config/kernel.release" 2>/dev/null || echo n/a)\`"
             echo "* Modules in package: \`$(ls "$WS/pkg/kernel-6.6-sky/modules" 2>/dev/null | wc -l)\`"
+            echo "* Merged DTBs: \`$(ls "$WS/dtbmerge/out" 2>/dev/null | tr '\n' ' ')\`"
             echo "* Package size: \`$(du -sh "$WS/kernel-6.6-sky.tar.gz" 2>/dev/null | cut -f1)\`"
           } >> $GITHUB_STEP_SUMMARY
